@@ -1,0 +1,285 @@
+---
+title: "Homework 3 (map2365)"
+author: "Megan Panier (uni: map2365)"
+Date: "10-16-2024"
+output: 
+md_document: github_document
+---
+
+# **Problem 1: NY NOAA Data Exploration**
+```{r hw_1_problem_1_setup, echo=FALSE}
+#Loading the libraries that will be needed to load our data 
+library(p8105.datasets)
+data("ny_noaa")
+
+knitr::opts_chunk$set(fig.width = 6, fig.asp = .6, out.width = "90%", echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggridges)
+library(patchwork)
+janitor::clean_names(ny_noaa)
+```
+## *Description of the Dataset Before Any Data Cleaning*
+_The `ny_noaa` dataset contains `r nrow(ny_noaa)` observations and `r ncol(ny_noaa)` variables. Key variables include `tmax` (maximum temperature), `tmin` (minimum temperature), `prcp` (precipitation), and `snow` (snowfall). Temperature is measured in tenths of degrees Celsius, while precipitation and snowfall are measured in tenths of millimeters. There are `r sum(is.na(ny_noaa$tmax))` missing values for `tmax` and `r sum(is.na(ny_noaa$tmin))` missing values for `tmin`, indicating the presence of missing data in this dataset._
+
+
+```{r hw_1_problem_1_cleaning, echo=FALSE}
+
+ny_noaa_clean <- ny_noaa %>%
+  mutate(
+    year = year(date),
+    month = month(date),
+    tmax = as.numeric(tmax) / 10,  
+    tmin = as.numeric(tmin) / 10,
+    prcp = as.numeric(prcp) / 10
+  )
+
+
+
+
+```
+## *Description of Data Set After Cleaning Steps*
+* The most commonly observed snowfall value is `r ny_noaa %>% count(snow) %>% arrange(desc(n)) %>% slice(1) %>% pull(snow)`, which is expected because many days report no snow, especially in non-winter months or in regions where snowfall is uncommon.
+
+```{r hw_1_problem_1_graph, echo=FALSE}
+jan_jul_subset <- ny_noaa_clean %>%
+  filter(as.integer(month) %in% c(1, 7)) %>%  
+  filter(!is.na(tmax)) %>%  # Filter out missing tmax values
+  group_by(id, year, month) %>%   
+  summarize(avg_tmax = mean(tmax, na.rm = TRUE), .groups = 'drop')
+
+ggplot(data = jan_jul_subset, aes(x = year, y = avg_tmax, group = id)) + 
+  geom_point() + 
+  geom_line() +
+  facet_grid(~month, labeller = labeller(month = c(`1` = "January", `7` = "July"))) +  # Custom labels for months
+  labs(
+    title = "Mean Monthly Temperature for Each Station Across Years for January and July",
+    x = "Year", 
+    y = "Average Maximum Temperature (°C)"  
+  ) +
+  theme_minimal()
+
+```
+
+*There are a couple of outliers, the most noticeable is in July, 1988. As expected the average max temperature in Jan is much lower than that in July. 
+```{r hw_1_problem_1_hex, echo=FALSE}
+hex_plot <- ny_noaa_clean %>%
+  filter(!is.na(tmin), !is.na(tmax)) %>%
+  ggplot(aes(x = tmin, y = tmax)) + 
+  geom_hex() +
+  labs(title = "Hex Plot: Minimum vs Maximum Temperature")
+
+ridge_plot <- ny_noaa_clean %>%
+  filter(snow < 100 & snow > 0, !is.na(snow)) %>%
+  ggplot(aes(x = snow, y = as.factor(year))) + 
+  geom_density_ridges() +
+  labs(title = "Snowfall Distribution", x = "Snowfall (mm)", y = "Year")
+hex_plot + ridge_plot
+```
+# **Problem 2**
+```{r hw_3_problem_2, echo=FALSE}
+library(readr)
+nhanes_accel = 
+  read_csv("./nhanes_accel.csv",
+  na = c("NA", ",", "")) %>%
+  janitor::clean_names()
+
+nhanes_covar = 
+  read_csv("./nhanes_covar.csv", 
+           na = c("NA", ",", ""),
+           skip = 4) %>%
+  janitor::clean_names() %>%
+  
+  mutate(
+    sex = factor(sex),
+    education = factor(education),
+    sex = case_when(
+      sex == 1 ~ "male", 
+      sex == 2 ~ "female"
+    ),
+
+    education = case_when(
+      education == 1 ~ "less than high school", 
+      education == 2 ~ "high school equivalent", 
+      education == 3 ~ "more than high school"
+    )
+)
+
+nhanes_mims = 
+  full_join(nhanes_covar, nhanes_accel) %>%
+  filter(!is.na(education) & age >= 21)
+```
+
+*Here, the dataset is cleaned and converted to tidy form by converting sex and education into factors. We then filter out participants under the age of 21 and those with missing demographic information. The dataset now contains 'r nrow(nhanes_mims)' observations and 'r ncol(nhanes_mims)' variables.
+
+```{r hw_3_problem_2_sex_educ, echo=FALSE}
+
+nhanes_mims %>%
+  group_by(education, sex) %>%
+  janitor::tabyl(sex, education)
+```
+*The distribution of participants by gender across different education levels. Here males that completed a highschool equivelancy are the least common. The most common demongraphic was males and females that had more than a highschool education. 
+```{r hw_3_problem_2_sex_educ_plot, echo=FALSE}
+age_distrb = 
+  ggplot(nhanes_mims, aes(x = age, fill = sex)) +
+  geom_density(alpha = 0.5) + 
+  facet_grid(~ education) +
+  labs(title = "Age Distribution by Gender and Education",
+       x = "Age", y = "Density", fill = "Sex") +
+  scale_fill_manual(values = c("red", "blue")) +
+  theme_minimal()
+```
+
+```{r hw_3_problem_2_activity_total, echo=FALSE}
+nhanes_mims <- nhanes_mims %>%
+  mutate(total_mims = rowSums(across(min1:min1440), na.rm = TRUE))
+
+totalactivity = ggplot(data = nhanes_mims, aes(x = age, y = total_mims, color = sex)) + 
+  geom_point() +  
+  geom_smooth(se = FALSE) +
+  facet_wrap(~ education) +  
+  labs(
+    title = "Total Activity by Age and Education Level",
+    color = "Sex",
+    x = "Age",
+    y = "Total MIMS"
+  ) +
+  theme_minimal()  
+```
+*Here we see that total activity (measured in MIMS) varied by age. Across all education groups, we can see a general decline in activity with age, but the decline is larger for participants with less than high school education. Women tend to have higher levels of activity than men, except in the older age groups with less than a high school education.
+```{r hw_3_problem_2_24_hour_activity, echo=FALSE}
+nhanes_data_df <- nhanes_mims %>%
+  pivot_longer(
+    cols = min1:min1440,
+    names_to = "minute",
+    values_to = "MIMS",
+    names_prefix = "min") %>%
+  group_by(seqn, sex, age, education) 
+
+nhanes_avg <- nhanes_data_df %>%
+  group_by(minute, sex, education) %>%  
+  summarize(mean_MIMS = mean(MIMS, na.rm = TRUE))
+
+hr_cycle = ggplot(nhanes_avg, aes(x = as.numeric(minute), y = mean_MIMS, color = sex)) + 
+  geom_line() +
+  facet_grid(. ~ education) +  
+  labs(
+    title = "Mean MIMS 24-Hr Cycle by Sex and Education Level",
+    x = "Minute of the Day",
+    y = "Mean MIMS",
+    caption = "NHANES data of participants aged 21 and over"
+  ) +
+  theme_minimal()  
+```
+*This plot shows us that participants with less than a high school education tended to reach their peak activity earlier in the day, and then had lower activity levels shortly after. Other groups had more stable energy expendetures during the day. 
+
+## *Problem 3*
+# **Problem 3: Citi Bike Data Exploration**
+
+### Data Import and Preparation
+
+In this step, we load and clean the Citi Bike data from January and July of 2020 and 2024, combining the four datasets into one for further analysis.
+
+```{r p3, echo=FALSE}
+
+Jan_2020_bike <- read_csv("./citibike/Jan 2020 Citi.csv", na = c("NA", ".", "")) %>%
+  janitor::clean_names()%>%
+  mutate(year = 2020, month = "January")
+
+Jan_2024_bike <- read_csv("./citibike/Jan 2024 Citi.csv", na = c("NA", ".", "")) %>%
+  janitor::clean_names()%>%
+  mutate(year = 2024, month = "January")
+
+July_2020_bike <- read_csv("./citibike/July 2020 Citi.csv", na = c("NA", ".", "")) %>%
+  janitor::clean_names()%>%
+  mutate(year = 2020, month = "July")
+
+July_2024_bike <- read_csv("./citibike/July 2024 Citi.csv", na = c("NA", ".", "")) %>%
+  janitor::clean_names()%>%
+  mutate(year = 2024, month = "July")
+
+citi_bike_data <- bind_rows(Jan_2020_bike, Jan_2024_bike, July_2020_bike, July_2024_bike)
+glimpse(citi_bike_data)
+```
+*the combined dataset has 'r nrow(citi_bike_data)' observations and 'r ncol(citi_bike_data)' variables.
+
+```{r problem_3_cont, echo=FALSE}
+rides_summary <- citi_bike_data %>%
+  group_by(year, month, member_casual) %>%
+  summarize(total_rides = n(), .groups = 'drop')
+  
+rides_pivot <- rides_summary %>%
+  pivot_wider(names_from = member_casual, values_from = total_rides, values_fill = 0) %>%
+  arrange(year, month)
+  
+print(rides_pivot)
+```
+*This table summarizes the number of rides by membership type for each year and month. We observe a notable increase in rides during July, especially in 2024, with more casual riders in July compared to January.
+```{r problem_3, echo=FALSE}
+top_stations <- citi_bike_data %>%
+  filter(month == "July", year == 2024) %>%
+  group_by(start_station_name) %>%
+  summarize(num_rides = n()) %>%
+  arrange(desc(num_rides)) %>%
+  slice_head(n = 5)
+  
+print(top_stations)
+```
+
+```{r problem_cont, echo=FALSE}
+median_ride_duration <- citi_bike_data %>%
+  group_by(weekdays, month, year) %>%
+  summarize(median_duration = median(duration, na.rm = TRUE))
+
+month_p = 
+ggplot(median_ride_duration, aes(x = month, y = median_duration)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Median Duration by Month",
+    x = "Month",
+    y = "Median Duration (minutes)"
+  ) +
+  theme(axis.text.x = element_text(size = 5),
+                plot.title = element_text(size = 10))
+
+weekday_p =
+ggplot(median_ride_duration, aes(x = weekdays, y = median_duration)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Median Duration by Weekday",
+    x = "Weekdays",
+    y = "Median Duration (minutes)"
+  ) +
+  theme(axis.text.x = element_text(size = 5),
+                plot.title = element_text(size = 10))
+year_p = 
+ggplot(median_ride_duration, aes(x = year, y = median_duration)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Median Duration by Year",
+    x = "Year",
+    y = "Median Duration (minutes)"
+  ) +
+  theme(axis.text.x = element_text(size = 5),
+                plot.title = element_text(size = 10))
+
+(month_p + weekday_p / year_p)
+```
+
+```{r problem_cont, echo=FALSE}
+bike_data_2024 <- citi_bike_data %>%
+  filter(year == 2024)
+
+ride_type = ggplot(bike_data_2024, aes(x = duration, fill = rideable_type)) +
+  geom_density(alpha = 0.2) +
+  facet_grid(month ~ member_casual) +
+  labs(
+    title = "Impact of Month, Membership, and Bike Type on Ride Duration",
+    x = "Ride Duration (minutes)",
+    y = "Density",
+    fill = "Bike Type"
+  ) +
+  theme_minimal()
+```
+
